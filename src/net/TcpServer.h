@@ -1,0 +1,51 @@
+#pragma once
+
+#include "base/NonCopyable.h"
+#include "net/Callbacks.h"
+#include "net/Acceptor.h"
+#include "net/EventLoopThreadPool.h"
+
+#include<map>
+#include<memory>
+#include<string>
+#include<functional>
+#include<atomic>
+namespace muduo
+{
+
+class EventLoop;
+class InetAddress;
+class EventLoopThreadPool;
+
+
+/*
+    Tcpserver 类，对外的服务入口，管理 Acceptor 和所有 TcpConnection
+*/
+class TcpServer : public NonCopyable {
+public:
+    TcpServer(EventLoop* loop, const InetAddress& listenAddr, const std::string& name);
+    ~TcpServer();
+    void start();
+
+    void setMessageCallback(const MessageCallback& cb) { messageCallback_ = cb; }
+    void setConnectionCallback(const ConnectionCallback& cb){connectionCallback_ =cb;}
+
+    void setThreadNum(int numThreads);
+private:
+    void newConnection(int sockfd, const InetAddress& peerAddr);
+    void removeConnection(const TcpConnectionPtr& conn);
+
+    EventLoop* loop_;                                       //main Reactor
+    std::string name_;                                      //name
+    std::unique_ptr<Acceptor> acceptor_;                    //acceptor 负责监听新连接事件
+    std::unique_ptr<EventLoopThreadPool> threadPool_;
+    std::atomic<bool> started_{false};                      //是否已启动
+    int nextConnId_{1};                                     //连接 ID 生成器
+    std::map<std::string,TcpConnectionPtr> connections_;
+    
+    MessageCallback messageCallback_;          
+    ConnectionCallback connectionCallback_;             //onMessage 回调函数
+
+};
+
+}// namespace muduo

@@ -1,0 +1,15 @@
+build/
+
+.codex/
+.claude/
+.agents/
+
+*.o
+*.a
+*.so
+*.dylib
+*.dll
+*.exe
+
+.cache/
+.DS_Store
