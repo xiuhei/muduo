@@ -66,5 +66,12 @@ void TcpServer::removeConnection(const TcpConnectionPtr& conn) {
         ioLoop->queueInLoop([conn] { conn->connectDestroyed(); });
     });
 }
+// TcpConnection.cpp 里加
+void TcpConnection::shutdown() {
+    if (state_ == State::Connected) {
+        setState(State::Disconnecting);
+        loop_->runInLoop([this] { shutdownInLoop(); });
+    }
+}
 
 }//namespace muduo

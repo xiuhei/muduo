@@ -22,6 +22,7 @@ public:
     size_t prependableBytes() const;
 
     // 返回可读数据起始地址，调用 retrieve/append 后该指针可能失效。
+    const char* findCRLF() const;
     const char* peek() const;
     // 消费 len 字节；如果 len 覆盖全部可读数据，则重置读写索引。
     void retrieve(size_t len);

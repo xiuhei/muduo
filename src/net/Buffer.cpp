@@ -5,8 +5,13 @@
 
 #include <cerrno>
 #include <cstring>
+#include <algorithm>  
 
 namespace muduo {
+
+namespace{
+    static const char CRLF[] ="\r\n";
+}
 
 Buffer::Buffer(size_t initialSize)
     : buffer_(kCheapPrepend + initialSize),
@@ -24,6 +29,15 @@ size_t Buffer::writableBytes() const {
 size_t Buffer::prependableBytes() const {
     return readIndex_;
 }
+
+
+const char* Buffer::findCRLF() const {
+    const char* start = peek();
+    const char* end = beginWrite();  // 可读数据的末尾
+    const char* pos = std::search(start, end, CRLF,CRLF + 2);
+    return pos == end ? nullptr : pos;
+}
+
 
 const char* Buffer::peek() const {
     return begin() + readIndex_;

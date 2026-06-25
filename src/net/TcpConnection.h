@@ -10,6 +10,7 @@
 #include <memory>
 #include <string>
 #include <utility>
+#include <any>
 
 namespace muduo
 {
@@ -26,6 +27,11 @@ public:
     TcpConnection(EventLoop* loop,std::string name, int sockfd, const InetAddress& localAddr, const InetAddress& peerAddr);
     ~TcpConnection();
 
+
+    void setContext_(const std::any& ctx){context_=ctx;}
+    const std::any& getContext() const { return context_; }
+    std::any* getMutableContext() { return &context_; }
+
     EventLoop* getLoop() const { return loop_; }
     const std::string& name() const { return name_; }
     const InetAddress& localAddress() const { return localAddr_; }
@@ -36,9 +42,11 @@ public:
     void setMessageCallback(MessageCallback cb) { messageCallback_ = std::move(cb); }
     void setCloseCallback(CloseCallback cb) { closeCallback_ = std::move(cb); }
 
+
     void connectEstablished();
     void connectDestroyed();
     void send(std::string message);
+    void shutdown();
 private:
     void setState(State state) { state_ = state; }
     void handleRead();
@@ -57,6 +65,7 @@ private:
     const InetAddress peerAddr_;         // 对端地址，来自 accept 返回的客户端地址。
     Buffer inputBuffer_;                 // 输入缓冲区，只在所属 loop 线程内读入和消费。
     Buffer outputBuffer_;     
+    std::any context_;
 
     MessageCallback messageCallback_;       // 读到数据后把连接和输入缓冲区交给用户。
     ConnectionCallback connectionCallback_; // 连接建立或断开时通知用户。
