@@ -14,6 +14,8 @@ public:
 
     HttpServer(EventLoop* loop, const InetAddress& listenAddr);
 
+    void setThreadNum(int num){server_.setThreadNum(num);}
+
     void setHttpCallback(HttpCallback cb) { httpCallback_ = std::move(cb); }
     void start() { server_.start(); }
 

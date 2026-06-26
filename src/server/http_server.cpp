@@ -1,12 +1,18 @@
 #include "net/EventLoop.h"
 #include "net/InetAddress.h"
+#include "net/TcpServer.h"
 #include "net/HttpServer.h"
 
 
-int main() {
+int main(int argc, char* argv[]) {
     muduo::EventLoop loop;
     muduo::InetAddress addr(8080);
     muduo::HttpServer server(&loop, addr);
+
+
+    int threadNum=0;
+    if(argc>1){threadNum=std::stoi(argv[1]);}
+    server.setThreadNum(threadNum);
 
     server.setHttpCallback([](const muduo::HttpRequest& req, muduo::HttpResponse* resp) {
     const std::string& path = req.path();
