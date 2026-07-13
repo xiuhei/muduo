@@ -2,6 +2,8 @@
 
 #include "base/NonCopyable.h"
 #include "net/Channel.h"
+#include "net/Timer.h"
+#include "net/TimerId.h"
 
 #include <atomic>
 #include <memory>
@@ -13,13 +15,14 @@
 namespace muduo
 {
 
-
 class Poller;
+class TimerQueue;
 
-    
 class EventLoop : public NonCopyable {
 public:
     using Functor = std::function<void()>;
+    using TimerCallback = std::function<void()>;
+
     EventLoop();
     ~EventLoop();
 
@@ -33,6 +36,16 @@ public:
     void updateChannel(Channel* channel);
     void removeChannel(Channel* channel);
 
+    // 定时器相关接口
+    // 在指定时刻执行回调
+    TimerId runAt(TimePoint time, TimerCallback cb);
+    // 延迟 delay 后执行一次
+    TimerId runAfter(Duration delay, TimerCallback cb);
+    // 每隔 interval 重复执行
+    TimerId runEvery(Duration interval, TimerCallback cb);
+    // 取消定时器
+    void cancel(TimerId timerId);
+
 private:
     void handleWakeupRead();
     void doPendingFunctors();
@@ -43,13 +56,13 @@ private:
     std::atomic<bool> callingPendingFunctors_{false};
     const std::thread::id threadId_{};
     std::unique_ptr<Poller> poller_;
+    std::unique_ptr<TimerQueue> timerQueue_;
     std::vector<Channel*> activeChannels_;
 
     int wakeupFd_{};
     Channel wakeupChannel_;
     std::mutex mutex_{};
     std::vector<Functor> pendingFunctors_;
-
 
 };
 

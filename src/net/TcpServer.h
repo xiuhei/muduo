@@ -4,12 +4,15 @@
 #include "net/Callbacks.h"
 #include "net/Acceptor.h"
 #include "net/EventLoopThreadPool.h"
+#include "net/Timer.h"
+#include "net/TimerId.h"
 
 #include<map>
 #include<memory>
 #include<string>
 #include<functional>
 #include<atomic>
+#include<chrono>
 namespace muduo
 {
 
@@ -31,6 +34,12 @@ public:
     void setConnectionCallback(const ConnectionCallback& cb){connectionCallback_ =cb;}
 
     void setThreadNum(int numThreads);
+
+    // 设置连接空闲超时（秒），0 表示不启用
+    void setConnectionIdleTimeout(std::chrono::seconds timeout) { connectionIdleTimeout_ = timeout; }
+    // 设置连接写入超时，0 表示不启用
+    void setConnectionWriteTimeout(Duration timeout) { connectionWriteTimeout_ = timeout; }
+
 private:
     void newConnection(int sockfd, const InetAddress& peerAddr);
     void removeConnection(const TcpConnectionPtr& conn);
@@ -43,8 +52,12 @@ private:
     int nextConnId_{1};                                     //连接 ID 生成器
     std::map<std::string,TcpConnectionPtr> connections_;
     
-    MessageCallback messageCallback_;          
+    MessageCallback messageCallback_;    
     ConnectionCallback connectionCallback_;             //onMessage 回调函数
+
+    std::chrono::seconds connectionIdleTimeout_{0};
+    TimerId idleCheckTimerId_;
+    Duration connectionWriteTimeout_{0};
 
 };
 

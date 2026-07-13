@@ -25,10 +25,28 @@ void TcpServer::start(){
     if (!started_.exchange(true)) {
         threadPool_->start();
         // listen fd 属于 base loop，监听动作也投递回 base loop 执行。
-        loop_->runInLoop([this] { acceptor_->listen(); });
+        loop_->runInLoop([this] {
+            acceptor_->listen();
+            // 如果配置了空闲超时或写入超时，启动周期性扫描定时器
+            if (connectionIdleTimeout_.count() > 0 || connectionWriteTimeout_.count() > 0) {
+                idleCheckTimerId_ = loop_->runEvery(std::chrono::seconds(3), [this] {
+                    // 每 3 秒扫描所有连接，关闭空闲/写入超时的连接
+                    TimePoint now = std::chrono::steady_clock::now();
+                    for (auto it = connections_.begin(); it != connections_.end(); ) {
+                        const auto& conn = it->second;
+                        if (conn->isIdleTimeout(now) || conn->isWriteTimeout(now)) {
+                            conn->shutdown();
+                        }
+                        ++it;
+                    }
+                });
+            }
+        });
     }
 }
 TcpServer::~TcpServer() {
+    // 取消周期性空闲扫描定时器，防止 TcpServer 析构后定时器回调访问野指针
+    loop_->cancel(idleCheckTimerId_);
     for (auto& [name, conn] : connections_) {
         EventLoop* ioLoop = conn->getLoop();
         ioLoop->runInLoop([conn] { conn->connectDestroyed(); });
@@ -56,6 +74,12 @@ void TcpServer::newConnection(int sockfd, const InetAddress& peerAddr) {
     conn->setCloseCallback([this](const TcpConnectionPtr& c){removeConnection(c);});
 
     ioLoop->runInLoop([conn]{conn->connectEstablished();});
+    if (connectionIdleTimeout_.count() > 0) {
+        conn->setIdleTimeout(connectionIdleTimeout_);
+    }
+    if (connectionWriteTimeout_.count() > 0) {
+        conn->setWriteTimeout(connectionWriteTimeout_);
+    }
     std::cout << "new connection " << connName << " from " << peerAddr.toIpPort() << '\n';
 }
 
@@ -65,13 +89,6 @@ void TcpServer::removeConnection(const TcpConnectionPtr& conn) {
         EventLoop* ioLoop = conn->getLoop();
         ioLoop->queueInLoop([conn] { conn->connectDestroyed(); });
     });
-}
-// TcpConnection.cpp 里加
-void TcpConnection::shutdown() {
-    if (state_ == State::Connected) {
-        setState(State::Disconnecting);
-        loop_->runInLoop([this] { shutdownInLoop(); });
-    }
 }
 
 }//namespace muduo

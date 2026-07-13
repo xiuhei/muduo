@@ -27,6 +27,7 @@ set(MUDUO_SOURCES
     src/net/Socket.cpp
     src/net/TcpConnection.cpp
     src/net/TcpServer.cpp
+    src/net/TimerQueue.cpp
     src/net/HttpContext.cpp
     src/net/HttpRequest.cpp
     src/net/HttpResponse.cpp

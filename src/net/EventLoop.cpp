@@ -1,7 +1,7 @@
 #include "net/EventLoop.h"
 #include "net/Poller.h"
 #include "net/Channel.h"
-
+#include "net/TimerQueue.h"
 
 #include <cerrno>
 #include <stdexcept>
@@ -9,6 +9,8 @@
 #include <unistd.h>
 #include <cstring>
 #include <memory>
+#include <chrono>
+#include <optional>
 
 namespace muduo
 {
@@ -23,9 +25,10 @@ int createEventFd() {
 }
 } // namespace
 
-EventLoop::EventLoop() 
+EventLoop::EventLoop()
     :  threadId_(std::this_thread::get_id()),
       poller_(std::make_unique<Poller>()),
+      timerQueue_(std::make_unique<TimerQueue>(this)),
       wakeupFd_(createEventFd()),
       wakeupChannel_(this,wakeupFd_) {
         wakeupChannel_.setReadCallback([this]{handleWakeupRead(); });
@@ -44,7 +47,23 @@ void EventLoop::loop() {
     quit_ = false;
     while (!quit_) {
         activeChannels_.clear();
-        poller_->poll(10000, &activeChannels_);
+
+        // 使用最近定时器的到期时间作为 poll 超时，避免定时器延迟触发
+        auto nextTimeout = timerQueue_->getNextTimeout();
+        int timeoutMs = 10000;  // 默认 10s
+        if (nextTimeout.has_value()) {
+            auto now = std::chrono::steady_clock::now();
+            if (nextTimeout.value() <= now) {
+                timeoutMs = 0;  // 已有定时器到期，立即返回
+            } else {
+                auto duration = nextTimeout.value() - now;
+                timeoutMs = static_cast<int>(
+                    std::chrono::duration_cast<std::chrono::milliseconds>(duration).count());
+                if (timeoutMs < 1) timeoutMs = 1;  // 至少 1ms
+            }
+        }
+
+        poller_->poll(timeoutMs, &activeChannels_);
         for (Channel* channel : activeChannels_) {
             channel->handleEvent();
         }
@@ -123,10 +142,31 @@ void EventLoop::queueInLoop(Functor cb){
 
 void EventLoop::wakeup() {
     uint64_t one = 1;
-    // eventfd 计数累加即可表达“有任务待处理”，不需要传递具体任务内容。
+    // eventfd 计数累加即可表达”有任务待处理”，不需要传递具体任务内容。
     ssize_t n = ::write(wakeupFd_, &one, sizeof(one));
     (void)n;
 }
 
+TimerId EventLoop::runAt(TimePoint time, TimerCallback cb)
+{
+    return timerQueue_->addTimer(std::move(cb), time, Duration::zero());
+}
+
+TimerId EventLoop::runAfter(Duration delay, TimerCallback cb)
+{
+    TimePoint when = std::chrono::steady_clock::now() + delay;
+    return timerQueue_->addTimer(std::move(cb), when, Duration::zero());
+}
+
+TimerId EventLoop::runEvery(Duration interval, TimerCallback cb)
+{
+    TimePoint when = std::chrono::steady_clock::now() + interval;
+    return timerQueue_->addTimer(std::move(cb), when, interval);
+}
+
+void EventLoop::cancel(TimerId timerId)
+{
+    timerQueue_->cancel(timerId);
+}
 
 }// namespace muduo

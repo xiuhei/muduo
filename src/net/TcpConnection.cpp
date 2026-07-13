@@ -26,12 +26,26 @@ TcpConnection::TcpConnection(EventLoop* loop,std::string name, int sockfd, const
 
     
 TcpConnection::~TcpConnection() = default;
+
+
+bool TcpConnection::isIdleTimeout(std::chrono::steady_clock::time_point now) const{
+    if(idleTimeout_.count()==0){ return false;}
+    auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - lastActiveTime_);
+    return elapsed >= idleTimeout_;
+}
+
+bool TcpConnection::isWriteTimeout(TimePoint now) const {
+    if (writeTimeout_.count() == 0) return false;
+    if (writeStartTime_ == TimePoint{}) return false;  // 没有积压数据
+    return (now - writeStartTime_) > writeTimeout_;
+}
     
 void TcpConnection::connectEstablished(){
 loop_->assertInLoopThread();
     setState(State::Connected);
     // 连接建立后才把 connfd 加入 epoll，之后读事件由所属 IO loop 处理。
     channel_.enableReading();
+    lastActiveTime_ = std::chrono::steady_clock::now();
     if (connectionCallback_) {
         connectionCallback_(shared_from_this());
     }
@@ -54,6 +68,7 @@ void TcpConnection::handleRead() {
         int savedErrno = 0;
         // 非阻塞 fd 要一直读到 EAGAIN，避免本轮可读事件的数据没取干净。
         ssize_t n = inputBuffer_.readFd(socket_.fd(), &savedErrno);
+        lastActiveTime_ = std::chrono::steady_clock::now();
         if (n > 0) {
             if (messageCallback_) {
                 messageCallback_(shared_from_this(), &inputBuffer_);
@@ -84,6 +99,8 @@ void TcpConnection::handleWrite() {
     ssize_t n=::write(socket_.fd(),outputBuffer_.peek(),outputBuffer_.readableBytes());
     if (n > 0) {
         outputBuffer_.retrieve(static_cast<size_t>(n));
+        // 每次成功写出数据时更新最后活跃时间戳
+        lastActiveTime_ = std::chrono::steady_clock::now();
     } else if (n < 0 && errno != EAGAIN && errno != EWOULDBLOCK) {
         handleError();
         return;
@@ -91,6 +108,8 @@ void TcpConnection::handleWrite() {
 
     if(outputBuffer_.readableBytes()==0){
         channel_.disableWriting();
+        // 缓冲区清空，清除写入开始时间
+        writeStartTime_ = TimePoint{};
         if(state_==State::Disconnecting){
             shutdownInLoop();
         }
@@ -99,6 +118,7 @@ void TcpConnection::handleWrite() {
 
 void TcpConnection::handleClose() {
     loop_->assertInLoopThread();
+    loop_->cancel(shutdownTimerId_);
     setState(State::Disconnected);
     channel_.disableAll();
     if (closeCallback_) {
@@ -114,6 +134,13 @@ void TcpConnection::shutdownInLoop() {
     loop_->assertInLoopThread();
     if (!channel_.isWriting()) {
         socket_.shutdownWrite();
+    }
+    // 设置优雅关闭超时：如果对端在 shutdownTimeout_ 时间内不回 FIN，
+    // 则强制关闭连接，防止连接永久卡在 Disconnecting 状态
+    if (shutdownTimeout_.count() > 0) {
+        shutdownTimerId_ = loop_->runAfter(shutdownTimeout_, [self = shared_from_this()] {
+            self->forceCloseInLoop();
+        });
     }
 }
 
@@ -137,7 +164,9 @@ void TcpConnection::sendInLoop(std::string message) {
         return;
     }
 
-    if (!channel_.isWriting() && outputBuffer_.readableBytes() == 0) {
+    bool bufferWasEmpty = (outputBuffer_.readableBytes() == 0);
+
+    if (!channel_.isWriting() && bufferWasEmpty) {
         // 先尝试直接写；写不完的部分再进入输出缓冲区，等待 EPOLLOUT。
         ssize_t n = ::write(socket_.fd(), message.data(), message.size());
         if (n >= 0) {
@@ -152,8 +181,34 @@ void TcpConnection::sendInLoop(std::string message) {
     }
 
     outputBuffer_.append(message);
+    // 缓冲区从空变为非空时记录写入开始时间，用于写入超时检测
+    if (bufferWasEmpty && writeTimeout_.count() > 0) {
+        writeStartTime_ = std::chrono::steady_clock::now();
+    }
     if (!channel_.isWriting()) {
         channel_.enableWriting();
+    }
+}
+
+void TcpConnection::shutdown() {
+    if (state_ == State::Connected) {
+        setState(State::Disconnecting);
+        loop_->runInLoop([this] { shutdownInLoop(); });
+    }
+}
+
+void TcpConnection::forceClose() {
+    if (loop_->isInLoopThread()) {
+        forceCloseInLoop();
+    } else {
+        loop_->queueInLoop([self = shared_from_this()] { self->forceCloseInLoop(); });
+    }
+}
+
+void TcpConnection::forceCloseInLoop() {
+    loop_->assertInLoopThread();
+    if (state_ != State::Disconnected) {
+        handleClose();
     }
 }
 
