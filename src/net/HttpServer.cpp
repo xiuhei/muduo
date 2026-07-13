@@ -4,6 +4,7 @@
 #include "net/InetAddress.h"
 #include "net/TcpConnection.h"
 
+#include <chrono>
 
 namespace muduo{
 
@@ -15,6 +16,8 @@ namespace muduo{
         [this](const TcpConnectionPtr& conn, Buffer* buf) {
             onMessage(conn, buf);
         });
+    // 将 HTTP 的超时配置传递给底层 TcpServer
+    server_.setConnectionIdleTimeout(keepAliveTimeout_);
 }
 
     void HttpServer::onConnection(const TcpConnectionPtr& conn){
@@ -26,6 +29,18 @@ namespace muduo{
     void HttpServer::onMessage(const TcpConnectionPtr& conn, Buffer* buf){
         HttpContext* context = std::any_cast<HttpContext>(conn->getMutableContext());
 
+        // Slowloris 防御：检查请求解析是否超时
+        if (requestTimeout_.count() > 0) {
+            auto now = std::chrono::steady_clock::now();
+            auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - context->requestStartTime);
+            if (elapsed >= requestTimeout_) {
+                // 请求解析超时，返回 408 Request Timeout 并关闭连接
+                conn->send("HTTP/1.1 408 Request Timeout\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
+                conn->shutdown();
+                return;
+            }
+        }
+
         // 解析，返回 false 说明报文格式有问题
         if (!context->parseRequest(buf)) {
             // 回一个 400 Bad Request 然后关连接
@@ -33,7 +48,7 @@ namespace muduo{
             conn->shutdown();
             return;
         }
-        
+
         // 解析完整了才处理，没完整就等下次数据来
         if (context->gotAll()) {
             onRequest(conn, context->request());
@@ -47,7 +62,7 @@ namespace muduo{
         const std::string& connection = req.getHeader("Connection");
         bool close = (connection == "close") ||
                  (req.version() == HttpRequest::Version::Http10);
-    
+
         HttpResponse response;
         response.setCloseConnection(close);
 
@@ -59,10 +74,15 @@ namespace muduo{
         Buffer buf;
         response.appendToBuffer(&buf);
         conn->send(buf.retrieveAllAsString());
-    
+
         // 如果需要关闭连接
         if (response.closeConnection()) {
             conn->shutdown();
+        } else {
+            // Keep-alive 连接：确保空闲超时已设置，响应发送后若客户端长时间不发新请求则主动关闭
+            if (keepAliveTimeout_.count() > 0) {
+                conn->setIdleTimeout(keepAliveTimeout_);
+            }
         }
     }
 }
