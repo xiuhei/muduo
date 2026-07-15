@@ -3,6 +3,8 @@
 #include "net/TcpServer.h"
 #include "net/HttpRequest.h"
 #include "net/HttpResponse.h"
+#include "net/Timer.h"
+#include "net/TimerId.h"
 
 #include <functional>
 #include <chrono>
@@ -12,6 +14,7 @@ namespace muduo {
 class HttpServer {
 public:
     using HttpCallback = std::function<void(const HttpRequest&, HttpResponse*)>;
+    using TimerCallback = std::function<void()>;
 
     HttpServer(EventLoop* loop, const InetAddress& listenAddr);
 
@@ -24,6 +27,12 @@ public:
     void setRequestTimeout(std::chrono::seconds timeout) { requestTimeout_ = timeout; }
     // 设置 HTTP Keep-Alive 空闲超时，默认 60 秒。复用连接在发送完响应后若空闲超时则关闭
     void setKeepAliveTimeout(std::chrono::seconds timeout) { keepAliveTimeout_ = timeout; }
+
+    // 定时器接口，委托给底层 TcpServer -> EventLoop。线程安全（可在其他线程调用）
+    TimerId runAt(TimePoint time, TimerCallback cb) { return server_.runAt(time, std::move(cb)); }
+    TimerId runAfter(Duration delay, TimerCallback cb) { return server_.runAfter(delay, std::move(cb)); }
+    TimerId runEvery(Duration interval, TimerCallback cb) { return server_.runEvery(interval, std::move(cb)); }
+    void cancelTimer(TimerId timerId) { server_.cancelTimer(timerId); }
 
 
 private:

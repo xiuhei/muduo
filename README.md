@@ -43,8 +43,9 @@ src/
 │   └── HttpContext / HttpRequest /
 │       HttpResponse / HttpServer         HTTP 协议层
 └── server/
-    ├── echo_server.cpp    # 多线程回显服务器示例
-    └── http_server.cpp    # HTTP 服务器示例
+    ├── echo_server.cpp      # 多线程回显服务器示例
+    ├── http_server.cpp     # HTTP 服务器示例
+    └── timeout_example.cpp # 定时器接口演示
 ```
 
 ## 编译
@@ -53,7 +54,7 @@ mkdir -p build && cd build
 cmake ..
 make -j
 ```
-产物为静态库 `libmuduo.a`，以及两个示例可执行文件 `echo_server`、`http_server`。
+产物为静态库 `libmuduo.a`，以及三个示例可执行文件 `echo_server`、`http_server`、`timeout_example`。
 
 ## 运行示例
 
@@ -74,6 +75,14 @@ make -j
 
 可通过 `HttpServer::setHttpCallback` 自定义请求处理逻辑。
 
+### Timeout Example
+```bash
+./build/timeout_example [端口号，默认 8080]
+```
+演示 `runAfter` / `runEvery` 定时器接口的基本用法：
+- 启动后每 5 秒在控制台打印一次 tick（`runEvery`）
+- 浏览器访问 `http://localhost:8080/api/timeout` 触发一个 3 秒延迟任务（`runAfter`）
+
 ## 压测
 ```bash
 wrk -t4 -c100 -d10s http://127.0.0.1:8080/
@@ -81,4 +90,3 @@ wrk -t4 -c100 -d10s http://127.0.0.1:8080/
 本机测得约 22 万 QPS（单线程模式）      同设备环境对比原muduo 30 万 qps。
 本机测得约 86 万 QPS（4线程并发模式）   同设备环境对比原muduo 69 万 qps。
 
-由于本项目缺少日志系统等更加完善的机制，qps可能表现略微虚高
