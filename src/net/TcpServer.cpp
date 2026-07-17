@@ -91,4 +91,25 @@ void TcpServer::removeConnection(const TcpConnectionPtr& conn) {
     });
 }
 
+// 定时器接口，直接委托给 base EventLoop
+TimerId TcpServer::runAt(TimePoint time, TimerCallback cb)
+{
+    return loop_->runAt(time, std::move(cb));
+}
+
+TimerId TcpServer::runAfter(Duration delay, TimerCallback cb)
+{
+    return loop_->runAfter(delay, std::move(cb));
+}
+
+TimerId TcpServer::runEvery(Duration interval, TimerCallback cb)
+{
+    return loop_->runEvery(interval, std::move(cb));
+}
+
+void TcpServer::cancelTimer(TimerId timerId)
+{
+    loop_->cancel(timerId);
+}
+
 }//namespace muduo

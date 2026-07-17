@@ -26,6 +26,8 @@ class EventLoopThreadPool;
 */
 class TcpServer : public NonCopyable {
 public:
+    using TimerCallback = std::function<void()>;
+
     TcpServer(EventLoop* loop, const InetAddress& listenAddr, const std::string& name);
     ~TcpServer();
     void start();
@@ -39,6 +41,12 @@ public:
     void setConnectionIdleTimeout(std::chrono::seconds timeout) { connectionIdleTimeout_ = timeout; }
     // 设置连接写入超时，0 表示不启用
     void setConnectionWriteTimeout(Duration timeout) { connectionWriteTimeout_ = timeout; }
+
+    // 定时器接口，委托给 base EventLoop。线程安全（可在其他线程调用）
+    TimerId runAt(TimePoint time, TimerCallback cb);
+    TimerId runAfter(Duration delay, TimerCallback cb);
+    TimerId runEvery(Duration interval, TimerCallback cb);
+    void cancelTimer(TimerId timerId);
 
 private:
     void newConnection(int sockfd, const InetAddress& peerAddr);

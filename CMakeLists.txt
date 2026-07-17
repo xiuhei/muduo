@@ -47,3 +47,7 @@ target_link_libraries(echo_server PRIVATE muduo)
 # 示例程序：HTTP 服务器
 add_executable(http_server src/server/http_server.cpp)
 target_link_libraries(http_server PRIVATE muduo)
+
+# 示例程序：定时器接口示例与测试
+add_executable(timeout_example src/server/timeout_example.cpp)
+target_link_libraries(timeout_example PRIVATE muduo)
