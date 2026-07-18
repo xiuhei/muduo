@@ -1,11 +1,11 @@
 #include "net/Acceptor.h"
 
+#include "base/Logger.h"
 #include "net/EventLoop.h"
 #include "net/Socket.h"
 
 #include <cerrno>
 #include <cstring>
-#include <stdio.h>
 #include <stdexcept>
 #include <string>
 #include <unistd.h>
@@ -17,6 +17,7 @@ namespace {
 int createNonblockingSocket() {
     int sockfd = ::socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
     if (sockfd < 0) {
+        LOG_CRITICAL("failed to create accept socket: {}", std::strerror(errno));
         throw std::runtime_error(std::string("socket: ") + std::strerror(errno));
     }
     return sockfd;
@@ -34,16 +35,24 @@ Acceptor::Acceptor(EventLoop* loop, const InetAddress& listenAddr)
 }
 
 Acceptor::~Acceptor() {
-    if (listening_) {
-        acceptChannel_.disableAll();
-        loop_->removeChannel(&acceptChannel_);
-    }
+    stop();
+}
+
+void Acceptor::stop() {
+    loop_->assertInLoopThread();
+    if (!listening_) return;
+
+    listening_ = false;
+    acceptChannel_.disableAll();
+    loop_->removeChannel(&acceptChannel_);
+    LOG_INFO("acceptor stopped listening on fd={}", acceptSocket_.fd());
 }
 
 void Acceptor::listen() {
     listening_ = true;
     acceptSocket_.listen();
     acceptChannel_.enableReading();
+    LOG_INFO("acceptor started listening on fd={}", acceptSocket_.fd());
 }
 
 void Acceptor::handleRead() {
@@ -52,9 +61,11 @@ void Acceptor::handleRead() {
         InetAddress peerAddr(0);
         int connfd = acceptSocket_.accept(&peerAddr);
         if (connfd >= 0) {
-            if (newConnectionCallback_) {
+            if (listening_ && newConnectionCallback_) {
                 newConnectionCallback_(connfd, peerAddr);
             } else {
+                LOG_WARN("accepted fd={} from {} without a connection callback; closing it",
+                         connfd, peerAddr.toIpPort());
                 ::close(connfd);
             }
             continue;
@@ -65,6 +76,7 @@ void Acceptor::handleRead() {
         if (errno == EINTR) {
             continue;
         }
+        LOG_ERROR("accept failed on fd={}: {}", acceptSocket_.fd(), std::strerror(errno));
         break;
     }
 }

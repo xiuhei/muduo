@@ -2,10 +2,17 @@
 #include "net/InetAddress.h"
 #include "net/TcpServer.h"
 #include "net/HttpServer.h"
+#include "base/Logger.h"
+#include "net/SignalWatcher.h"
+
+#include <csignal>
 
 
 int main(int argc, char* argv[]) {
+    muduo::SignalWatcher::block({SIGINT, SIGTERM});
+    muduo::LogGuard logGuard("muduo");
     muduo::EventLoop loop;
+    muduo::SignalWatcher signals(&loop, {SIGINT, SIGTERM});
     muduo::InetAddress addr(8080);
     muduo::HttpServer server(&loop, addr);
 
@@ -35,5 +42,9 @@ int main(int argc, char* argv[]) {
 });
 
     server.start();
+    signals.setCallback([&](int) {
+        server.stop(std::chrono::seconds(10), [&loop] { loop.quit(); });
+    });
+    LOG_INFO("http_server listening on 0.0.0.0:8080 with {} IO threads", threadNum);
     loop.loop();
 }

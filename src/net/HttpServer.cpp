@@ -1,4 +1,5 @@
 #include "net/HttpServer.h"
+#include "base/Logger.h"
 #include "net/Buffer.h"
 #include "net/HttpContext.h"
 #include "net/InetAddress.h"
@@ -34,6 +35,8 @@ namespace muduo{
             auto now = std::chrono::steady_clock::now();
             auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - context->requestStartTime);
             if (elapsed >= requestTimeout_) {
+                LOG_WARN("HTTP request timeout from {} after {} seconds",
+                         conn->peerAddress().toIpPort(), elapsed.count());
                 // 请求解析超时，返回 408 Request Timeout 并关闭连接
                 conn->send("HTTP/1.1 408 Request Timeout\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
                 conn->shutdown();
@@ -43,6 +46,8 @@ namespace muduo{
 
         // 解析，返回 false 说明报文格式有问题
         if (!context->parseRequest(buf)) {
+            LOG_WARN("invalid HTTP request from {}; returning 400",
+                     conn->peerAddress().toIpPort());
             // 回一个 400 Bad Request 然后关连接
             conn->send("HTTP/1.1 400 Bad Request\r\n\r\n");
             conn->shutdown();
@@ -51,7 +56,11 @@ namespace muduo{
 
         // 解析完整了才处理，没完整就等下次数据来
         if (context->gotAll()) {
-            onRequest(conn, context->request());
+            const HttpRequest& request = context->request();
+            LOG_DEBUG("HTTP request: peer={} method={} path={}",
+                      conn->peerAddress().toIpPort(),
+                      static_cast<int>(request.method()), request.path());
+            onRequest(conn, request);
             context->reset(); // 处理完重置，准备下一个请求（keep-alive）
         }
     }

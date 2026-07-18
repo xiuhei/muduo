@@ -31,6 +31,10 @@ public:
     TcpServer(EventLoop* loop, const InetAddress& listenAddr, const std::string& name);
     ~TcpServer();
     void start();
+    // 停止接收新连接，等待现有连接关闭；超过 gracePeriod 后强制关闭。
+    // completed 始终在 base EventLoop 线程执行。
+    void stop(Duration gracePeriod = std::chrono::seconds(10),
+              std::function<void()> completed = {});
 
     void setMessageCallback(const MessageCallback& cb) { messageCallback_ = cb; }
     void setConnectionCallback(const ConnectionCallback& cb){connectionCallback_ =cb;}
@@ -51,12 +55,15 @@ public:
 private:
     void newConnection(int sockfd, const InetAddress& peerAddr);
     void removeConnection(const TcpConnectionPtr& conn);
+    void stopInLoop(Duration gracePeriod, std::function<void()> completed);
+    void finishStop();
 
     EventLoop* loop_;                                       //main Reactor
     std::string name_;                                      //name
     std::unique_ptr<Acceptor> acceptor_;                    //acceptor 负责监听新连接事件
     std::unique_ptr<EventLoopThreadPool> threadPool_;
     std::atomic<bool> started_{false};                      //是否已启动
+    std::atomic<bool> stopping_{false};
     int nextConnId_{1};                                     //连接 ID 生成器
     std::map<std::string,TcpConnectionPtr> connections_;
     
@@ -66,6 +73,8 @@ private:
     std::chrono::seconds connectionIdleTimeout_{0};
     TimerId idleCheckTimerId_;
     Duration connectionWriteTimeout_{0};
+    TimerId forceCloseTimerId_;
+    std::function<void()> stopCompleted_;
 
 };
 

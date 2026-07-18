@@ -3,9 +3,12 @@
 #include "net/EventLoopThreadPool.h"
 #include "net/Acceptor.h"
 #include "net/EventLoop.h"
+#include "base/Logger.h"
 
 #include<memory>
-#include<iostream>
+#include <cerrno>
+#include <cstring>
+#include <unistd.h>
 
 
 namespace muduo
@@ -23,6 +26,7 @@ TcpServer::TcpServer(EventLoop* loop, const InetAddress& listenAddr, const std::
 
 void TcpServer::start(){
     if (!started_.exchange(true)) {
+        LOG_INFO("starting TCP server {}", name_);
         threadPool_->start();
         // listen fd 属于 base loop，监听动作也投递回 base loop 执行。
         loop_->runInLoop([this] {
@@ -35,6 +39,8 @@ void TcpServer::start(){
                     for (auto it = connections_.begin(); it != connections_.end(); ) {
                         const auto& conn = it->second;
                         if (conn->isIdleTimeout(now) || conn->isWriteTimeout(now)) {
+                            LOG_WARN("connection {} exceeded configured timeout; shutting down",
+                                     conn->name());
                             conn->shutdown();
                         }
                         ++it;
@@ -45,12 +51,63 @@ void TcpServer::start(){
     }
 }
 TcpServer::~TcpServer() {
+    loop_->assertInLoopThread();
+    LOG_INFO("stopping TCP server {} with {} active connections", name_, connections_.size());
+    acceptor_->stop();
     // 取消周期性空闲扫描定时器，防止 TcpServer 析构后定时器回调访问野指针
     loop_->cancel(idleCheckTimerId_);
+    loop_->cancel(forceCloseTimerId_);
     for (auto& [name, conn] : connections_) {
+        conn->setCloseCallback({});
         EventLoop* ioLoop = conn->getLoop();
         ioLoop->runInLoop([conn] { conn->connectDestroyed(); });
     }
+}
+
+void TcpServer::stop(Duration gracePeriod, std::function<void()> completed) {
+    loop_->runInLoop([this, gracePeriod, completed = std::move(completed)]() mutable {
+        stopInLoop(gracePeriod, std::move(completed));
+    });
+}
+
+void TcpServer::stopInLoop(Duration gracePeriod, std::function<void()> completed) {
+    loop_->assertInLoopThread();
+    if (stopping_.exchange(true)) {
+        return;
+    }
+
+    stopCompleted_ = std::move(completed);
+    acceptor_->stop();
+    loop_->cancel(idleCheckTimerId_);
+    LOG_INFO("draining TCP server {} with {} active connections", name_, connections_.size());
+
+    if (connections_.empty()) {
+        finishStop();
+        return;
+    }
+
+    // shutdown 任务排在此前已经投递给相同 IO loop 的业务任务之后。
+    for (const auto& entry : connections_) {
+        entry.second->shutdown();
+    }
+
+    if (gracePeriod <= Duration::zero()) {
+        for (const auto& entry : connections_) entry.second->forceClose();
+    } else {
+        forceCloseTimerId_ = loop_->runAfter(gracePeriod, [this] {
+            LOG_WARN("graceful shutdown timeout for {}; force closing {} connections",
+                     name_, connections_.size());
+            for (const auto& entry : connections_) entry.second->forceClose();
+        });
+    }
+}
+
+void TcpServer::finishStop() {
+    loop_->assertInLoopThread();
+    loop_->cancel(forceCloseTimerId_);
+    LOG_INFO("TCP server {} drained all connections", name_);
+    auto completed = std::move(stopCompleted_);
+    if (completed) completed();
 }
 
 void  TcpServer::setThreadNum(int numThreads) {
@@ -59,12 +116,19 @@ void  TcpServer::setThreadNum(int numThreads) {
 
 void TcpServer::newConnection(int sockfd, const InetAddress& peerAddr) {
     loop_->assertInLoopThread();
+    if (stopping_) {
+        LOG_INFO("rejecting connection from {} while server is stopping", peerAddr.toIpPort());
+        ::close(sockfd);
+        return;
+    }
     EventLoop *ioLoop=threadPool_->getNextLoop();
     std::string connName = name_ + "#" + std::to_string(nextConnId_++);
 
     sockaddr_in local{};
     socklen_t addrlen = sizeof(local);
-    ::getsockname(sockfd, reinterpret_cast<sockaddr*>(&local), &addrlen);
+    if (::getsockname(sockfd, reinterpret_cast<sockaddr*>(&local), &addrlen) < 0) {
+        LOG_ERROR("getsockname failed for fd={}: {}", sockfd, std::strerror(errno));
+    }
     InetAddress localAddr(local);
 
     auto conn=std::make_shared<TcpConnection>(ioLoop, connName, sockfd, localAddr, peerAddr);
@@ -80,14 +144,18 @@ void TcpServer::newConnection(int sockfd, const InetAddress& peerAddr) {
     if (connectionWriteTimeout_.count() > 0) {
         conn->setWriteTimeout(connectionWriteTimeout_);
     }
-    std::cout << "new connection " << connName << " from " << peerAddr.toIpPort() << '\n';
+    LOG_INFO("new connection {} from {}", connName, peerAddr.toIpPort());
 }
 
 void TcpServer::removeConnection(const TcpConnectionPtr& conn) {
     loop_->runInLoop([this, conn] {
+        LOG_DEBUG("removing connection {}", conn->name());
         connections_.erase(conn->name());
         EventLoop* ioLoop = conn->getLoop();
         ioLoop->queueInLoop([conn] { conn->connectDestroyed(); });
+        if (stopping_ && connections_.empty()) {
+            finishStop();
+        }
     });
 }
 

@@ -1,4 +1,5 @@
 #include "net/EventLoop.h"
+#include "base/Logger.h"
 #include "net/Poller.h"
 #include "net/Channel.h"
 #include "net/TimerQueue.h"
@@ -11,14 +12,20 @@
 #include <memory>
 #include <chrono>
 #include <optional>
+#include <functional>
 
 namespace muduo
 {
 
 namespace {
+std::size_t threadIdValue(std::thread::id id) {
+    return std::hash<std::thread::id>{}(id);
+}
+
 int createEventFd() {
     int fd = ::eventfd(0, EFD_NONBLOCK | EFD_CLOEXEC);
     if (fd < 0) {
+        LOG_CRITICAL("failed to create eventfd: {}", std::strerror(errno));
         throw std::runtime_error(std::string("eventfd: ") + std::strerror(errno));
     }
     return fd;
@@ -36,6 +43,7 @@ EventLoop::EventLoop()
       }
 
 EventLoop::~EventLoop() {
+    LOG_DEBUG("EventLoop destroyed (owner_thread={})", threadIdValue(threadId_));
     wakeupChannel_.disableAll();
     removeChannel(&wakeupChannel_);
     ::close(wakeupFd_);
@@ -43,6 +51,7 @@ EventLoop::~EventLoop() {
 
 void EventLoop::loop() {
     assertInLoopThread();
+    LOG_DEBUG("EventLoop started (owner_thread={})", threadIdValue(threadId_));
     looping_ = true;
     quit_ = false;
     while (!quit_) {
@@ -71,6 +80,7 @@ void EventLoop::loop() {
         doPendingFunctors();
     }
     looping_ = false;
+    LOG_DEBUG("EventLoop stopped (owner_thread={})", threadIdValue(threadId_));
 }
 
 bool EventLoop::isInLoopThread() const{
@@ -79,6 +89,8 @@ bool EventLoop::isInLoopThread() const{
 
 void EventLoop::assertInLoopThread() const {
     if (!isInLoopThread()) {
+        LOG_ERROR("EventLoop accessed from wrong thread: owner={}, caller={}",
+                  threadIdValue(threadId_), threadIdValue(std::this_thread::get_id()));
         throw std::logic_error("EventLoop method called from the wrong thread");
     }
 }
@@ -104,7 +116,9 @@ void EventLoop::handleWakeupRead(){
     uint64_t one = 0;
     // 读掉 eventfd 计数，避免唤醒事件一直处于可读状态。
     ssize_t n = ::read(wakeupFd_, &one, sizeof(one));
-    (void)n;
+    if (n < 0 && errno != EAGAIN) {
+        LOG_ERROR("failed to read eventfd {}: {}", wakeupFd_, std::strerror(errno));
+    }
 }
 
 void EventLoop::doPendingFunctors() {
@@ -144,7 +158,9 @@ void EventLoop::wakeup() {
     uint64_t one = 1;
     // eventfd 计数累加即可表达”有任务待处理”，不需要传递具体任务内容。
     ssize_t n = ::write(wakeupFd_, &one, sizeof(one));
-    (void)n;
+    if (n < 0 && errno != EAGAIN) {
+        LOG_ERROR("failed to write eventfd {}: {}", wakeupFd_, std::strerror(errno));
+    }
 }
 
 TimerId EventLoop::runAt(TimePoint time, TimerCallback cb)

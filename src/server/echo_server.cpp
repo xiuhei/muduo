@@ -2,19 +2,25 @@
 #include"net/TcpServer.h"
 #include"net/InetAddress.h"
 #include"net/TcpConnection.h"
+#include"base/Logger.h"
+#include "net/SignalWatcher.h"
 
 #include<iostream>
+#include <csignal>
 
 int main(int argc, char* argv[]){
+    muduo::SignalWatcher::block({SIGINT, SIGTERM});
+    muduo::LogGuard logGuard("muduo");
     muduo::EventLoop mainLoop;
+    muduo::SignalWatcher signals(&mainLoop, {SIGINT, SIGTERM});
     muduo::TcpServer server(&mainLoop, muduo::InetAddress(8888),std::string("EchoServer"));
     
     int threadNum=4;
     if(argc>1){threadNum=std::stoi(argv[1]);}
     server.setThreadNum(threadNum);
     server.setConnectionCallback([](const muduo::TcpConnectionPtr& conn) {
-        std::cout << (conn->connected() ? "connected " : "disconnected ")
-                  << conn->name() << " peer=" << conn->peerAddress().toIpPort() << '\n';
+        LOG_INFO("{} {} peer={}", conn->connected() ? "connected" : "disconnected",
+                 conn->name(), conn->peerAddress().toIpPort());
     });
     server.setMessageCallback([](const muduo::TcpConnectionPtr& conn, muduo::Buffer* buffer) {
         std::string message = buffer->retrieveAllAsString();
@@ -22,7 +28,10 @@ int main(int argc, char* argv[]){
     });
 
     server.start();
-    std::cout << "echo_server listening on 0.0.0.0:8888 with "<< threadNum<< " IO threads\n";
+    signals.setCallback([&](int) {
+        server.stop(std::chrono::seconds(10), [&mainLoop] { mainLoop.quit(); });
+    });
+    LOG_INFO("echo_server listening on 0.0.0.0:8888 with {} IO threads", threadNum);
     mainLoop.loop();
     
 

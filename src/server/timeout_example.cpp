@@ -10,28 +10,34 @@
 #include "net/HttpRequest.h"
 #include "net/HttpResponse.h"
 #include "net/InetAddress.h"
+#include "net/SignalWatcher.h"
+#include "base/Logger.h"
 
 #include <iostream>
 #include <atomic>
+#include <csignal>
 
 using namespace muduo;
 
 int main(int argc, char* argv[]) {
+    SignalWatcher::block({SIGINT, SIGTERM});
+    LogGuard logGuard("muduo");
     int port = (argc > 1) ? std::stoi(argv[1]) : 8080;
 
     EventLoop loop;
+    SignalWatcher signals(&loop, {SIGINT, SIGTERM});
     HttpServer server(&loop, InetAddress(port));
 
     std::atomic<int> tickCount{0};
 
     // ---- 演示 runEvery：每 5 秒在控制台打印一次 ----
     server.runEvery(std::chrono::seconds(5), [&] {
-        std::cout << "[runEvery] tick #" << ++tickCount << "\n";
+        LOG_INFO("[runEvery] tick #{}", ++tickCount);
     });
 
     // ---- 演示 runAfter：启动 1 秒后打印就绪信息 ----
     server.runAfter(std::chrono::seconds(1), [port] {
-        std::cout << "服务器已就绪，浏览器打开 http://localhost:" << port << "\n";
+        LOG_INFO("服务器已就绪，浏览器打开 http://localhost:{}", port);
     });
 
     // ---- HTTP 路由 ----
@@ -59,10 +65,10 @@ int main(int argc, char* argv[]) {
         // /api/timeout：触发一个 runAfter 延迟任务
         if (path == "/api/timeout") {
             server.runAfter(std::chrono::seconds(3), [] {
-                std::cout << "[runAfter] 3 秒延迟任务触发！\n";
+                LOG_INFO("[runAfter] 3 秒延迟任务触发！");
             });
 
-            std::cout << "[runAfter] 已安排一个 3 秒后触发的延迟任务\n";
+            LOG_INFO("[runAfter] 已安排一个 3 秒后触发的延迟任务");
 
             resp->setStatusCode(HttpResponse::StatusCode::Ok);
             resp->setStatusMessage("OK");
@@ -80,6 +86,9 @@ int main(int argc, char* argv[]) {
 
     server.setThreadNum(1);
     server.start();
+    signals.setCallback([&](int) {
+        server.stop(std::chrono::seconds(10), [&loop] { loop.quit(); });
+    });
     loop.loop();
 
     return 0;

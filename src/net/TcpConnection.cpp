@@ -1,11 +1,11 @@
 #include "net/TcpConnection.h"
+#include "base/Logger.h"
 #include "net/Channel.h"
 #include "net/EventLoop.h"
 
 #include<unistd.h>
 #include <cerrno>
 #include <cstring>
-#include<iostream>
 #include <utility>
 
 namespace muduo
@@ -41,11 +41,13 @@ bool TcpConnection::isWriteTimeout(TimePoint now) const {
 }
     
 void TcpConnection::connectEstablished(){
-loop_->assertInLoopThread();
+    loop_->assertInLoopThread();
     setState(State::Connected);
     // 连接建立后才把 connfd 加入 epoll，之后读事件由所属 IO loop 处理。
     channel_.enableReading();
     lastActiveTime_ = std::chrono::steady_clock::now();
+    LOG_DEBUG("connection established: {} local={} peer={}",
+              name_, localAddr_.toIpPort(), peerAddr_.toIpPort());
     if (connectionCallback_) {
         connectionCallback_(shared_from_this());
     }
@@ -61,6 +63,7 @@ void TcpConnection::connectDestroyed(){
         }
     }
     loop_->removeChannel(&channel_);
+    LOG_DEBUG("connection destroyed: {}", name_);
 }
 
 void TcpConnection::handleRead() {
@@ -76,6 +79,7 @@ void TcpConnection::handleRead() {
             continue;
         }
         if (n == 0) {
+            LOG_DEBUG("peer closed connection: {}", name_);
             handleClose();
             break;
         }
@@ -121,13 +125,14 @@ void TcpConnection::handleClose() {
     loop_->cancel(shutdownTimerId_);
     setState(State::Disconnected);
     channel_.disableAll();
+    LOG_INFO("connection closed: {} peer={}", name_, peerAddr_.toIpPort());
     if (closeCallback_) {
         closeCallback_(shared_from_this());
     }
 }
 
 void TcpConnection::handleError() {
-    std::cerr << "TcpConnection error on " << name_ << ": " << std::strerror(errno) << '\n';
+    LOG_ERROR("TcpConnection error on {}: {}", name_, std::strerror(errno));
 }
 
 void TcpConnection::shutdownInLoop() {
@@ -145,9 +150,6 @@ void TcpConnection::shutdownInLoop() {
 }
 
 void TcpConnection::send(std::string message) {
-    if (state_ != State::Connected) {
-        return;
-    }
     if (loop_->isInLoopThread()) {
         sendInLoop(std::move(message));
     } else {
@@ -161,6 +163,8 @@ void TcpConnection::send(std::string message) {
 void TcpConnection::sendInLoop(std::string message) {
     loop_->assertInLoopThread();
     if (state_ == State::Disconnected) {
+        LOG_WARN("discarding {} bytes for disconnected connection {}",
+                 message.size(), name_);
         return;
     }
 
@@ -191,10 +195,13 @@ void TcpConnection::sendInLoop(std::string message) {
 }
 
 void TcpConnection::shutdown() {
-    if (state_ == State::Connected) {
-        setState(State::Disconnecting);
-        loop_->runInLoop([this] { shutdownInLoop(); });
-    }
+    auto self = shared_from_this();
+    loop_->runInLoop([self] {
+        if (self->state_ != State::Connected) return;
+        LOG_DEBUG("graceful shutdown requested for connection {}", self->name_);
+        self->setState(State::Disconnecting);
+        self->shutdownInLoop();
+    });
 }
 
 void TcpConnection::forceClose() {
@@ -208,6 +215,7 @@ void TcpConnection::forceClose() {
 void TcpConnection::forceCloseInLoop() {
     loop_->assertInLoopThread();
     if (state_ != State::Disconnected) {
+        LOG_WARN("force closing connection {}", name_);
         handleClose();
     }
 }

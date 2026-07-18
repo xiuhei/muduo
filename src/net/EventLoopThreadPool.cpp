@@ -1,4 +1,5 @@
 #include "net/EventLoopThreadPool.h"
+#include "base/Logger.h"
 #include "net/EventLoopThread.h"
 
 #include"net/EventLoop.h"
@@ -20,6 +21,7 @@ void EventLoopThreadPool::start(){
         return;
     }
     started_ = true;
+    LOG_INFO("starting EventLoopThreadPool with {} IO threads", numThreads_);
 
     // 每个 EventLoopThread 拥有一个独立 IO 线程和一个独立 EventLoop。
     for (int i = 0; i < numThreads_; ++i) {
@@ -28,6 +30,7 @@ void EventLoopThreadPool::start(){
         threads_.push_back(std::move(thread));
         loops_.push_back(loop);
     }
+    LOG_INFO("EventLoopThreadPool started with {} IO threads", loops_.size());
 }
 
 EventLoop* EventLoopThreadPool::getNextLoop(){

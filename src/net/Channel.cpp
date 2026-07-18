@@ -1,8 +1,8 @@
 #include "net/Channel.h"
 #include "net/EventLoop.h"
+#include "base/Logger.h"
 
 #include <unistd.h>
-#include <stdio.h>
 #include <sys/epoll.h>
 
 namespace muduo{
@@ -59,7 +59,7 @@ void Channel::update() {
     if (loop_) {
         loop_->updateChannel(this);
     } else {
-        fprintf(stderr, "Channel::update() - no owner loop\n");
+        LOG_ERROR("Channel::update() - no owner loop");
     }
 }
 

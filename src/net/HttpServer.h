@@ -22,6 +22,10 @@ public:
 
     void setHttpCallback(HttpCallback cb) { httpCallback_ = std::move(cb); }
     void start() { server_.start(); }
+    void stop(Duration gracePeriod = std::chrono::seconds(10),
+              std::function<void()> completed = {}) {
+        server_.stop(gracePeriod, std::move(completed));
+    }
 
     // 设置请求解析超时，默认 15 秒。防止 Slowloris 攻击——客户端缓慢发送不完整请求
     void setRequestTimeout(std::chrono::seconds timeout) { requestTimeout_ = timeout; }

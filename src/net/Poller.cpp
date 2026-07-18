@@ -1,10 +1,11 @@
 #include "net/Poller.h"
 #include "net/Channel.h"
+#include "base/Logger.h"
 
 #include <sys/epoll.h>
 #include <unistd.h>
-#include <stdio.h>
 #include <errno.h>
+#include <cstring>
 
 namespace muduo
 {
@@ -13,7 +14,7 @@ Poller::Poller()
     : epollfd_(::epoll_create1(EPOLL_CLOEXEC)),
         events_(16){
         if (epollfd_ < 0) {
-            perror("Poller::Poller");
+            LOG_ERROR("Poller::Poller: {}", std::strerror(errno));
         }
 }
 
@@ -30,7 +31,7 @@ void Poller::poll(int timeoutMs, std::vector<Channel*>* activeChannels) {
             events_.resize(events_.size() * 2);
         }
     } else if (numEvents < 0 && errno != EINTR) {
-        perror("Poller::poll");
+        LOG_ERROR("Poller::poll: {}", std::strerror(errno));
     }
 }
 
@@ -39,7 +40,7 @@ void Poller::update(int operation, Channel* channel) {
     event.events = channel->events();
     event.data.ptr = channel;
     if(::epoll_ctl(epollfd_, operation, channel->fd(), &event) < 0) {
-        perror("Poller::update");
+        LOG_ERROR("Poller::update: {}", std::strerror(errno));
     }
 }
 

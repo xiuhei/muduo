@@ -1,7 +1,9 @@
 #include "net/Socket.h"
 #include "net/InetAddress.h"
+#include "base/Logger.h"
 
-#include <cstdio>
+#include <cerrno>
+#include <cstring>
 #include <sys/socket.h>
 #include <unistd.h>
 
@@ -17,13 +19,13 @@ Socket::~Socket() {
 void Socket::bindAddress(const InetAddress& localaddr) {
     const struct sockaddr_in& addr = localaddr.getSockAddrIn();
     if (::bind(sockfd_, reinterpret_cast<const struct sockaddr*>(&addr), sizeof(addr)) < 0) {
-        perror("Socket::bindAddress");
+        LOG_ERROR("Socket::bindAddress: {}", std::strerror(errno));
     }
 }
 
 void Socket::listen() {
     if (::listen(sockfd_, SOMAXCONN) < 0) {
-        perror("Socket::listen");
+        LOG_ERROR("Socket::listen: {}", std::strerror(errno));
     }
 }
 
@@ -39,14 +41,14 @@ int Socket::accept(InetAddress* peeraddr) {
 
 void Socket::shutdownWrite() {
     if (::shutdown(sockfd_, SHUT_WR) < 0) {
-        perror("Socket::shutdownWrite");
+        LOG_ERROR("Socket::shutdownWrite: {}", std::strerror(errno));
     }
 }
 
 void Socket::setReuseAddr(bool on) {
     int optval = on ? 1 : 0;
     if (::setsockopt(sockfd_, SOL_SOCKET, SO_REUSEADDR, &optval, sizeof(optval)) < 0) {
-        perror("Socket::setReuseAddr");
+        LOG_ERROR("Socket::setReuseAddr: {}", std::strerror(errno));
     }
 }
 

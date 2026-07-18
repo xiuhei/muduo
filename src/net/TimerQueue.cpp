@@ -1,4 +1,5 @@
 #include "net/TimerQueue.h"
+#include "base/Logger.h"
 #include "net/EventLoop.h"
 
 #include <sys/timerfd.h>
@@ -17,6 +18,7 @@ int createTimerfd()
 {
     int fd = ::timerfd_create(CLOCK_MONOTONIC, TFD_NONBLOCK | TFD_CLOEXEC);
     if (fd < 0) {
+        LOG_CRITICAL("failed to create timerfd: {}", std::strerror(errno));
         throw std::runtime_error(std::string("timerfd_create: ") + std::strerror(errno));
     }
     return fd;
@@ -204,7 +206,7 @@ void TimerQueue::resetTimerfd(TimePoint expiration)
     struct itimerspec newValue = timePointToItimerspec(expiration);
     struct itimerspec oldValue{};
     if (::timerfd_settime(timerfd_, 0, &newValue, &oldValue) < 0) {
-        perror("TimerQueue::resetTimerfd");
+        LOG_ERROR("TimerQueue::resetTimerfd: {}", std::strerror(errno));
     }
 }
 
@@ -213,7 +215,9 @@ void TimerQueue::readTimerfd()
 {
     uint64_t expirations = 0;
     ssize_t n = ::read(timerfd_, &expirations, sizeof(expirations));
-    (void)n;
+    if (n < 0 && errno != EAGAIN) {
+        LOG_ERROR("failed to read timerfd {}: {}", timerfd_, std::strerror(errno));
+    }
 }
 
 } // namespace muduo
