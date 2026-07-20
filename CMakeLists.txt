@@ -27,29 +27,51 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 # 生成 compile_commands.json，供 clangd/IDE 索引使用
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
-# muduo 核心库源文件
-set(MUDUO_SOURCES
+# 基础设施：不依赖网络层
+set(MUDUO_BASE_SOURCES
     src/base/Logger.cpp
-    src/net/Acceptor.cpp
-    src/net/Buffer.cpp
-    src/net/Channel.cpp
-    src/net/Poller.cpp
-    src/net/EventLoop.cpp
-    src/net/EventLoopThread.cpp
-    src/net/EventLoopThreadPool.cpp
-    src/net/InetAddress.cpp
-    src/net/Socket.cpp
-    src/net/SignalWatcher.cpp
-    src/net/TcpConnection.cpp
-    src/net/TcpServer.cpp
-    src/net/TimerQueue.cpp
-    src/net/HttpContext.cpp
-    src/net/HttpRequest.cpp
-    src/net/HttpResponse.cpp
-    src/net/HttpServer.cpp
 )
 
-add_library(muduo ${MUDUO_SOURCES})
+# Reactor：事件分发、I/O 线程与进程信号接入
+set(MUDUO_REACTOR_SOURCES
+    src/net/reactor/Channel.cpp
+    src/net/reactor/Poller.cpp
+    src/net/reactor/EventLoop.cpp
+    src/net/reactor/EventLoopThread.cpp
+    src/net/reactor/EventLoopThreadPool.cpp
+    src/net/reactor/SignalWatcher.cpp
+)
+
+# Timer：依附 Reactor 的时间事件调度
+set(MUDUO_TIMER_SOURCES
+    src/net/timer/TimerQueue.cpp
+)
+
+# TCP：socket 封装、连接生命周期与字节流传输
+set(MUDUO_TCP_SOURCES
+    src/net/tcp/Acceptor.cpp
+    src/net/tcp/Buffer.cpp
+    src/net/tcp/InetAddress.cpp
+    src/net/tcp/Socket.cpp
+    src/net/tcp/TcpConnection.cpp
+    src/net/tcp/TcpServer.cpp
+)
+
+# HTTP：建立在 TCP 之上的应用协议层
+set(MUDUO_HTTP_SOURCES
+    src/http/HttpContext.cpp
+    src/http/HttpRequest.cpp
+    src/http/HttpResponse.cpp
+    src/http/HttpServer.cpp
+)
+
+add_library(muduo
+    ${MUDUO_BASE_SOURCES}
+    ${MUDUO_REACTOR_SOURCES}
+    ${MUDUO_TIMER_SOURCES}
+    ${MUDUO_TCP_SOURCES}
+    ${MUDUO_HTTP_SOURCES}
+)
 
 target_include_directories(muduo PUBLIC ${PROJECT_SOURCE_DIR}/src)
 target_compile_options(muduo PRIVATE -Wall -Wextra -Wpedantic)
@@ -57,13 +79,13 @@ target_compile_definitions(muduo PUBLIC SPDLOG_ACTIVE_LEVEL=SPDLOG_LEVEL_TRACE)
 target_link_libraries(muduo PUBLIC pthread spdlog::spdlog)
 
 # 示例程序：回显服务器
-add_executable(echo_server src/server/echo_server.cpp)
+add_executable(echo_server src/examples/echo_server.cpp)
 target_link_libraries(echo_server PRIVATE muduo)
 
 # 示例程序：HTTP 服务器
-add_executable(http_server src/server/http_server.cpp)
+add_executable(http_server src/examples/http_server.cpp)
 target_link_libraries(http_server PRIVATE muduo)
 
 # 示例程序：定时器接口示例与测试
-add_executable(timeout_example src/server/timeout_example.cpp)
+add_executable(timeout_example src/examples/timeout_example.cpp)
 target_link_libraries(timeout_example PRIVATE muduo)

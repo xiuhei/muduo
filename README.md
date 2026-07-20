@@ -10,9 +10,16 @@
 - C++17，CMake 构建
 - 基于 spdlog 的异步日志（文件记录 INFO+、控制台输出 WARN+、3 秒周期刷新、满队列背压、退出前排空）
 
-## 定时器机制
+## 定时器与超时策略
 
-项目实现了完整的定时器管理，基于 `timerfd` + epoll 集成，共包含以下模块：
+`EventLoop` 通过 `timerfd` 将时间事件接入 epoll，支持一次性任务、周期性任务及取消操作。`TcpServer` 和 `HttpServer` 对外提供相同的定时器接口：
+
+- `runAt`：在指定时间点执行一次
+- `runAfter`：延迟指定时长后执行一次
+- `runEvery`：按指定间隔重复执行
+- `cancelTimer`：取消尚未执行或仍在重复执行的定时器
+
+TCP 和 HTTP 层基于该机制提供以下超时策略：
 
 | 模块 | 类型 | 默认值 | 说明 |
 |------|------|--------|------|
@@ -22,26 +29,28 @@
 | HTTP 请求解析超时 | `HttpServer::setRequestTimeout` | 15 秒 | 防御 Slowloris 攻击，客户端缓慢发送不完整请求 |
 | HTTP Keep-Alive 空闲超时 | `HttpServer::setKeepAliveTimeout` | 60 秒 | Keep-Alive 连接响应发送后空闲超时则关闭 |
 
-> **注意**：超时配置应在调用 `start()` 之前完成设置。
+> **注意**：表中的服务器超时配置应在调用 `start()` 前完成；普通定时任务可以在服务运行期间通过上述接口创建或取消。
 
 ## 目录结构
 ```
 src/
-├── base/                  # 基础设施（NonCopyable 等）
-├── net/                   # 核心网络库
-│   ├── EventLoop / Channel / Poller      事件驱动核心（epoll 封装）
-│   ├── EventLoopThread(Pool)             I/O 线程与线程池
-│   ├── Acceptor / Socket / InetAddress   连接接入
-│   ├── TcpServer / TcpConnection         连接管理与读写
-│   ├── Buffer                            读写缓冲区
-│   ├── Timer / TimerId / TimerQueue      定时器与超时管理
-│   └── HttpContext / HttpRequest /
-│       HttpResponse / HttpServer         HTTP 协议层
-└── server/
-    ├── echo_server.cpp      # 多线程回显服务器示例
-    ├── http_server.cpp     # HTTP 服务器示例
-    └── timeout_example.cpp # 定时器接口演示
+├── base/                         # 通用基础设施：日志、不可复制基类
+├── net/
+│   ├── reactor/                  # Reactor 核心、epoll、I/O 线程及信号事件
+│   ├── timer/                    # 定时器模型与基于 timerfd 的时间事件队列
+│   └── tcp/                      # socket 封装、地址、缓冲区及 TCP 连接/服务
+├── http/                         # 基于 TCP 的 HTTP/1.1 协议与服务器
+└── examples/                     # 可执行示例，不属于库实现
+    ├── echo_server.cpp
+    ├── http_server.cpp
+    └── timeout_example.cpp
 ```
+
+总体依赖方向为：`base <- net(reactor + timer) <- net/tcp <- http <- examples`。
+`reactor` 与 `timer` 共同组成事件调度核心（`EventLoop` 对外暴露定时器接口，
+`TimerQueue` 接入 Reactor），TCP 层使用该核心，HTTP 层只通过 TCP 层提供服务；
+底层模块不得反向包含 HTTP 或示例代码。新增代码应按职责放入对应目录，避免再次
+形成扁平的 `net/` 聚合目录。
 
 ## 编译
 ```bash
@@ -74,13 +83,11 @@ make -j
 ```bash
 ./build/timeout_example [端口号，默认 8080]
 ```
-演示 `runAfter` / `runEvery` 定时器接口的基本用法：
-- 启动后每 5 秒在控制台打印一次 tick（`runEvery`）
-- 浏览器访问 `http://localhost:8080/api/timeout` 触发一个 3 秒延迟任务（`runAfter`）
+该示例通过 `runEvery` 周期性记录 tick；访问 `http://localhost:8080/api/timeout` 可通过 `runAfter` 创建延迟任务，具体行为见示例源码。
 
 ## 压测
 ```bash
 wrk -t4 -c100 -d10s http://127.0.0.1:8080/
 ```
-本机测得约 22 万 QPS（单线程模式）      同设备环境对比原muduo 30 万 qps。
-本机测得约 86 万 QPS（4线程并发模式）   同设备环境对比原muduo 69 万 qps。
+本机测得http_server示例函数 22 万 QPS（单线程模式）      同设备环境对比原muduo 30 万 qps。
+本机测得http_server示例函数 86 万 QPS（4线程并发模式）    同设备环境对比原muduo 69 万 qps。
