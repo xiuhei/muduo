@@ -65,12 +65,18 @@ set(MUDUO_HTTP_SOURCES
     src/http/HttpServer.cpp
 )
 
+# WebSocket：通过 HTTP/1.1 Upgrade 建立，随后在 TCP 字节流上解析帧
+set(MUDUO_WEBSOCKET_SOURCES
+    src/websocket/WebSocketServer.cpp
+)
+
 add_library(muduo
     ${MUDUO_BASE_SOURCES}
     ${MUDUO_REACTOR_SOURCES}
     ${MUDUO_TIMER_SOURCES}
     ${MUDUO_TCP_SOURCES}
     ${MUDUO_HTTP_SOURCES}
+    ${MUDUO_WEBSOCKET_SOURCES}
 )
 
 target_include_directories(muduo PUBLIC ${PROJECT_SOURCE_DIR}/src)
@@ -85,6 +91,10 @@ target_link_libraries(echo_server PRIVATE muduo)
 # 示例程序：HTTP 服务器
 add_executable(http_server src/examples/http_server.cpp)
 target_link_libraries(http_server PRIVATE muduo)
+
+# 示例程序：WebSocket 回显服务器
+add_executable(websocket_server src/examples/websocket_server.cpp)
+target_link_libraries(websocket_server PRIVATE muduo)
 
 # 示例程序：定时器接口示例与测试
 add_executable(timeout_example src/examples/timeout_example.cpp)

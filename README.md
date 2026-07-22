@@ -7,6 +7,7 @@
 - epoll（LT 模式）+ 非阻塞 I/O
 - 自实现 Buffer 缓冲区，支持自动扩容与 `readFd`/`retrieve` 等操作
 - HTTP/1.1 请求解析（状态机）与响应构造
+- WebSocket RFC 6455 服务端（HTTP Upgrade、分片、Ping/Pong、Close）
 - C++17，CMake 构建
 - 基于 spdlog 的异步日志（文件记录 INFO+、控制台输出 WARN+、3 秒周期刷新、满队列背压、退出前排空）
 
@@ -78,6 +79,19 @@ make -j
 - 其他路径返回 `404 Not Found`
 
 可通过 `HttpServer::setHttpCallback` 自定义请求处理逻辑。
+
+### WebSocket Server
+
+```bash
+./build/websocket_server [端口号，默认 8081] [线程数，默认 0]
+```
+
+启动后直接用浏览器访问 `http://127.0.0.1:8081/`，页面会自动连接
+`ws://127.0.0.1:8081/`，可输入消息并查看回显，无需打开开发者控制台。
+服务端会发送欢迎消息，并原样回显收到的文本或二进制消息。
+`WebSocketServer` 通过 `setOpenCallback`、`setMessageCallback` 和
+`setCloseCallback` 注册事件，通过 `setHttpCallback` 可选处理普通 HTTP 请求，
+并可通过 `sendText`、`sendBinary` 主动发送消息。
 
 ### Timeout Example
 ```bash

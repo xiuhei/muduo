@@ -11,15 +11,15 @@ namespace muduo{
 
     HttpServer::HttpServer(EventLoop* loop, const InetAddress& listenAddr)
     : server_(loop, listenAddr, "HttpServer") {
-    server_.setConnectionCallback(
-        [this](const TcpConnectionPtr& conn) { onConnection(conn); });
-    server_.setMessageCallback(
-        [this](const TcpConnectionPtr& conn, Buffer* buf) {
-            onMessage(conn, buf);
-        });
-    // 将 HTTP 的超时配置传递给底层 TcpServer
-    server_.setConnectionIdleTimeout(keepAliveTimeout_);
-}
+        server_.setConnectionCallback(
+            [this](const TcpConnectionPtr& conn) { onConnection(conn); });
+        server_.setMessageCallback(
+            [this](const TcpConnectionPtr& conn, Buffer* buf) {
+                onMessage(conn, buf);
+            });
+        // 将 HTTP 的超时配置传递给底层 TcpServer
+        server_.setConnectionIdleTimeout(keepAliveTimeout_);
+    }
 
     void HttpServer::onConnection(const TcpConnectionPtr& conn){
         if(conn->connected()){
